@@ -5,7 +5,7 @@
 #include <DHT.h>
 #include <DHT_U.h>
 #include <SparkFun_u-blox_GNSS_Arduino_Library.h>
-#include "Adafruit_AGS02MA.h"
+// #include "Adafruit_AGS02MA.h"
 #include <MPU6500_WE.h>
 #include <Wire.h>
 #include <Adafruit_BMP280.h>
@@ -49,9 +49,9 @@ GuL::PMS7003 pms(pmsSerial);
 Servo servo1;
 Servo servo2;
 Servo servo3;
-int servoPosition1;
-int servoPosition2;
-int servoPosition3;
+int servoPosition1 = 0;
+int servoPosition2 = 0;
+int servoPosition3 = 0;
 
 //Humidity sensor defines:
 
@@ -63,12 +63,14 @@ int humidityReading = 0;
 // GPS defines:
 
 SFE_UBLOX_GNSS myGNSS;
-long lastTime = 0;
+long lastTime  = 0;
+long latitude  = 546490000;
+long longitude = 250910000;
 
-// tvoc sensor defines:
+// // tvoc sensor defines:
 
-Adafruit_AGS02MA ags;
-uint32_t tvoc = 0;
+// Adafruit_AGS02MA ags;
+// uint32_t tvoc = 0;
 
 // Gyroscope; accelerometer defines
 
@@ -96,11 +98,14 @@ long lastTime5 = 0;
 // Radio defines
 
 LoRa_E220 e220ttl(16, 17, &Serial2, -1, 15, 15, UART_BPS_RATE_9600, SERIAL_8N1);
-bool setRadioParameters = 0;
 byte radioAddressLo = 0x03;
 byte radioAddressHi = 0x00;
 int RadioChannel = 23;
-bool found42069 = true;
+int radioAddress = 3;
+const int bufferSizeAddCh = 2;
+int bufferIndexAddCh = 0;
+int AddChBuffer[bufferSizeAddCh];
+bool setAddCh = false;
 
 
 // CO2 sensor defines:
@@ -120,6 +125,19 @@ bool found0xFF = false;
 int o2concentration = 0;
 
 
+// Targeting defines
+
+const int numSpoilers = 3;
+const int spoilerAngles[numSpoilers] = {0, 120, 240};
+int spoilerExtension[numSpoilers];
+int servoAngle = 180;
+int calculatedHeading = 0;
+double canSatHeading = 0;
+double latitudeTarget = 551142827 / 10000000.0;
+double longitudeTarget = 253362947 / 10000000.0;
+bool servoTargeting = false;
+
+
 void setup() {
 
   Serial.begin(115200);
@@ -127,6 +145,51 @@ void setup() {
   // Radio setup
 
 	e220ttl.begin();
+    ResponseStructContainer c;
+    c = e220ttl.getConfiguration();
+    Configuration configuration = *(Configuration*) c.data;
+
+    configuration.ADDL = 5;
+    configuration.ADDH = 1;
+    configuration.CHAN = 25;
+
+    configuration.SPED.uartBaudRate = UART_BPS_9600; // Serial baud rate
+    configuration.SPED.airDataRate = AIR_DATA_RATE_100_96; // Air baud rate
+    configuration.SPED.uartParity = MODE_00_8N1; // Parity bit
+
+    configuration.OPTION.subPacketSetting = SPS_200_00; // Packet size
+    configuration.OPTION.RSSIAmbientNoise = RSSI_AMBIENT_NOISE_DISABLED; // Need to send special command
+    configuration.OPTION.transmissionPower = POWER_22; // Device power
+
+    configuration.TRANSMISSION_MODE.enableRSSI = RSSI_DISABLED; // Enable RSSI info
+    configuration.TRANSMISSION_MODE.fixedTransmission = FT_TRANSPARENT_TRANSMISSION; // Enable repeater mode
+    configuration.TRANSMISSION_MODE.enableLBT = LBT_DISABLED; // Check interference
+    configuration.TRANSMISSION_MODE.WORPeriod = WOR_2000_011; // WOR timing
+    ResponseStatus rs = e220ttl.setConfiguration(configuration, WRITE_CFG_PWR_DWN_SAVE);
+    c = e220ttl.getConfiguration();
+    configuration = *(Configuration*) c.data;
+    
+    Serial.print(F("HEAD : "));  Serial.print(configuration.COMMAND, HEX);Serial.print(" ");Serial.print(configuration.STARTING_ADDRESS, HEX);Serial.print(" ");Serial.println(configuration.LENGHT, HEX);
+    Serial.println(F(" "));
+    Serial.print(F("AddH : "));  Serial.println(configuration.ADDH, HEX);
+    Serial.print(F("AddL : "));  Serial.println(configuration.ADDL, HEX);
+    Serial.println(F(" "));
+    Serial.print(F("Chan : "));  Serial.print(configuration.CHAN, DEC); Serial.print(" -&gt; "); Serial.println(configuration.getChannelDescription());
+    Serial.println(F(" "));
+    Serial.print(F("SpeedParityBit     : "));  Serial.print(configuration.SPED.uartParity, BIN);Serial.print(" -&gt; "); Serial.println(configuration.SPED.getUARTParityDescription());
+    Serial.print(F("SpeedUARTDatte     : "));  Serial.print(configuration.SPED.uartBaudRate, BIN);Serial.print(" -&gt; "); Serial.println(configuration.SPED.getUARTBaudRateDescription());
+    Serial.print(F("SpeedAirDataRate   : "));  Serial.print(configuration.SPED.airDataRate, BIN);Serial.print(" -&gt; "); Serial.println(configuration.SPED.getAirDataRateDescription());
+    Serial.println(F(" "));
+    Serial.print(F("OptionSubPacketSett: "));  Serial.print(configuration.OPTION.subPacketSetting, BIN);Serial.print(" -&gt; "); Serial.println(configuration.OPTION.getSubPacketSetting());
+    Serial.print(F("OptionTranPower    : "));  Serial.print(configuration.OPTION.transmissionPower, BIN);Serial.print(" -&gt; "); Serial.println(configuration.OPTION.getTransmissionPowerDescription());
+    Serial.print(F("OptionRSSIAmbientNo: "));  Serial.print(configuration.OPTION.RSSIAmbientNoise, BIN);Serial.print(" -&gt; "); Serial.println(configuration.OPTION.getRSSIAmbientNoiseEnable());
+    Serial.println(F(" "));
+    Serial.print(F("TransModeWORPeriod : "));  Serial.print(configuration.TRANSMISSION_MODE.WORPeriod, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getWORPeriodByParamsDescription());
+    Serial.print(F("TransModeEnableLBT : "));  Serial.print(configuration.TRANSMISSION_MODE.enableLBT, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getLBTEnableByteDescription());
+    Serial.print(F("TransModeEnableRSSI: "));  Serial.print(configuration.TRANSMISSION_MODE.enableRSSI, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getRSSIEnableByteDescription());
+    Serial.print(F("TransModeFixedTrans: "));  Serial.print(configuration.TRANSMISSION_MODE.fixedTransmission, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getFixedTransmissionDescription());
+
+    c.close();    
 
   // Particle sensor setup:
 
@@ -210,21 +273,21 @@ void setup() {
   myGNSS.saveConfiguration(); //Save the current settings to flash and BBR
 
 
-  // TVOC sensor setup:
+  // // TVOC sensor setup:
 
-  if (! ags.begin(&Wire, 0x1A)) {
-    Serial.println("Couldn't find AGS20MA sensor, check your wiring and pullup resistors!");
-    while (1) yield();
-  }
+  // if (! ags.begin(&Wire, 0x1A)) {
+  //   Serial.println("Couldn't find AGS20MA sensor, check your wiring and pullup resistors!");
+  //   while (1) yield();
+  // }
 
-  if (ags.getFirmwareVersion() == 0) {
-    Serial.println(F("Could not read firmware, I2C communications issue?"));
-    while (1) yield();
-  }
+  // if (ags.getFirmwareVersion() == 0) {
+  //   Serial.println(F("Could not read firmware, I2C communications issue?"));
+  //   while (1) yield();
+  // }
 
-  Serial.print("Firmware version: 0x");
-  Serial.println(ags.getFirmwareVersion(), HEX);
-  ags.printSensorDetails();
+  // Serial.print("Firmware version: 0x");
+  // Serial.println(ags.getFirmwareVersion(), HEX);
+  // ags.printSensorDetails();
 
   // Beeper setup:
 
@@ -336,30 +399,30 @@ void setup() {
 
 // SD card setup:
 
-SPI.begin(18, 23, 19, 5);
-SPI.setDataMode(SPI_MODE0);
+// SPI.begin(18, 23, 19, 5);
+// SPI.setDataMode(SPI_MODE0);
 
-    if(!SD.begin(5)){
-        Serial.println("Card Mount Failed");
-        return;
-    }
-    uint8_t cardType = SD.cardType();
+//     if(!SD.begin(5)){
+//         Serial.println("Card Mount Failed");
+//         return;
+//     }
+//     uint8_t cardType = SD.cardType();
 
-    if(cardType == CARD_NONE){
-        Serial.println("No SD card attached");
-        return;
-    }
+//     if(cardType == CARD_NONE){
+//         Serial.println("No SD card attached");
+//         return;
+//     }
 
-    Serial.print("SD Card Type: ");
-    if(cardType == CARD_MMC){
-        Serial.println("MMC");
-    } else if(cardType == CARD_SD){
-        Serial.println("SDSC");
-    } else if(cardType == CARD_SDHC){
-        Serial.println("SDHC");
-    } else {
-        Serial.println("UNKNOWN");
-    }
+//     Serial.print("SD Card Type: ");
+//     if(cardType == CARD_MMC){
+//         Serial.println("MMC");
+//     } else if(cardType == CARD_SD){
+//         Serial.println("SDSC");
+//     } else if(cardType == CARD_SDHC){
+//         Serial.println("SDHC");
+//     } else {
+//         Serial.println("UNKNOWN");
+//     }
 
 // O2 sensor setup:
 
@@ -410,21 +473,102 @@ void loop() {
     }
   }
 
-  // Listen for radio commands
-  if (Serial2.available()) {
-    int incomingCommand = Serial2.read();
-    if (incomingCommand == 42069) {
-      found42069 = true;
-      Serial2.println("enter servo position (0-180)");
-    } else if (found42069) {
-      servoPosition1 = incomingCommand;
-      found0xFF = false;
+
+  // set adress, channel
+  if (e220ttl.available()>1) {
+    ResponseContainer rc = e220ttl.receiveMessage();
+    int incomingCommand = rc.data.toInt();
+    if (incomingCommand == 1) {
+      setAddCh = true;
+      Serial.print(F("Adress -> Enter; Channel -> Enter"));
+    } else if (setAddCh) {
+      AddChBuffer[bufferIndexAddCh++] = incomingCommand;
+      if (bufferIndexAddCh == 2) {
+        radioAddress = AddChBuffer[0];
+        RadioChannel = AddChBuffer[1];
+        radioAddressHi = (radioAddress >> 8) & 0xFF;
+        radioAddressLo = radioAddress & 0xFF;
+        bufferIndexAddCh = 0;
+        setAddCh = false;
+
+        ResponseStructContainer c;
+        c = e220ttl.getConfiguration();
+        Configuration configuration = *(Configuration*) c.data;
+        configuration.ADDL = radioAddressLo;
+        configuration.ADDH = radioAddressHi;
+        configuration.CHAN = RadioChannel;
+
+        configuration.SPED.uartBaudRate = UART_BPS_9600; // Serial baud rate
+        configuration.SPED.airDataRate = AIR_DATA_RATE_100_96; // Air baud rate
+        configuration.SPED.uartParity = MODE_00_8N1; // Parity bit
+
+        configuration.OPTION.subPacketSetting = SPS_200_00; // Packet size
+        configuration.OPTION.RSSIAmbientNoise = RSSI_AMBIENT_NOISE_DISABLED; // Need to send special command
+        configuration.OPTION.transmissionPower = POWER_22; // Device power
+
+        configuration.TRANSMISSION_MODE.enableRSSI = RSSI_DISABLED; // Enable RSSI info
+        configuration.TRANSMISSION_MODE.fixedTransmission = FT_TRANSPARENT_TRANSMISSION; // Enable repeater mode
+        configuration.TRANSMISSION_MODE.enableLBT = LBT_DISABLED; // Check interference
+        configuration.TRANSMISSION_MODE.WORPeriod = WOR_2000_011; // WOR timing
+        ResponseStatus rs = e220ttl.setConfiguration(configuration, WRITE_CFG_PWR_DWN_SAVE);
+        c = e220ttl.getConfiguration();
+        configuration = *(Configuration*) c.data;
+        Serial.print(F("HEAD : "));  Serial.print(configuration.COMMAND, HEX);Serial.print(" ");Serial.print(configuration.STARTING_ADDRESS, HEX);Serial.print(" ");Serial.println(configuration.LENGHT, HEX);
+        Serial.println(F(" "));
+        Serial.print(F("AddH : "));  Serial.println(configuration.ADDH, HEX);
+        Serial.print(F("AddL : "));  Serial.println(configuration.ADDL, HEX);
+        Serial.println(F(" "));
+        Serial.print(F("Chan : "));  Serial.print(configuration.CHAN, DEC); Serial.print(" -&gt; "); Serial.println(configuration.getChannelDescription());
+        Serial.println(F(" "));
+        Serial.print(F("SpeedParityBit     : "));  Serial.print(configuration.SPED.uartParity, BIN);Serial.print(" -&gt; "); Serial.println(configuration.SPED.getUARTParityDescription());
+        Serial.print(F("SpeedUARTDatte     : "));  Serial.print(configuration.SPED.uartBaudRate, BIN);Serial.print(" -&gt; "); Serial.println(configuration.SPED.getUARTBaudRateDescription());
+        Serial.print(F("SpeedAirDataRate   : "));  Serial.print(configuration.SPED.airDataRate, BIN);Serial.print(" -&gt; "); Serial.println(configuration.SPED.getAirDataRateDescription());
+        Serial.println(F(" "));
+        Serial.print(F("OptionSubPacketSett: "));  Serial.print(configuration.OPTION.subPacketSetting, BIN);Serial.print(" -&gt; "); Serial.println(configuration.OPTION.getSubPacketSetting());
+        Serial.print(F("OptionTranPower    : "));  Serial.print(configuration.OPTION.transmissionPower, BIN);Serial.print(" -&gt; "); Serial.println(configuration.OPTION.getTransmissionPowerDescription());
+        Serial.print(F("OptionRSSIAmbientNo: "));  Serial.print(configuration.OPTION.RSSIAmbientNoise, BIN);Serial.print(" -&gt; "); Serial.println(configuration.OPTION.getRSSIAmbientNoiseEnable());
+        Serial.println(F(" "));
+        Serial.print(F("TransModeWORPeriod : "));  Serial.print(configuration.TRANSMISSION_MODE.WORPeriod, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getWORPeriodByParamsDescription());
+        Serial.print(F("TransModeEnableLBT : "));  Serial.print(configuration.TRANSMISSION_MODE.enableLBT, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getLBTEnableByteDescription());
+        Serial.print(F("TransModeEnableRSSI: "));  Serial.print(configuration.TRANSMISSION_MODE.enableRSSI, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getRSSIEnableByteDescription());
+        Serial.print(F("TransModeFixedTrans: "));  Serial.print(configuration.TRANSMISSION_MODE.fixedTransmission, BIN);Serial.print(" -&gt; "); Serial.println(configuration.TRANSMISSION_MODE.getFixedTransmissionDescription());
+        c.close();    
+
+      }
+    } else if (incomingCommand == 2 && setAddCh == false){
+        Serial.print("Opening sides");
+        servoPosition1 = 0;
+        servoPosition2 = 0;
+        servoPosition3 = 0;
+        servoTargeting = false;
+    } else if (incomingCommand == 3 && setAddCh == false){
+        Serial.print("Closing sides");
+        servoPosition1 = 150;
+        servoPosition2 = 150;
+        servoPosition3 = 150;
+        servoTargeting = false;
+    } else if (incomingCommand == 4 && setAddCh == false){
+        servoTargeting = true;
     }
   }
 
+  servo1.write(servoPosition1);
+  servo2.write(servoPosition2);
+  servo3.write(servoPosition3);
+
+  // if (millis() - lastTime4 > 10000)
+  // {
+  //   lastTime4 = millis(); //Update the timer
+
+  //   digitalWrite(BEEPER, HIGH);
+  //   delay(1);
+  //   digitalWrite(BEEPER, LOW);
+
+  // }
+
 
   // Read sensors
-  if (millis() - lastTime > 2000)
+  if (millis() - lastTime > 1000)
   {
     lastTime = millis(); //Update the timer
 
@@ -436,8 +580,8 @@ void loop() {
     pms.read();
     
     // GPS read:
-    long latitude = myGNSS.getLatitude();
-    long longitude = myGNSS.getLongitude();
+    latitude = myGNSS.getLatitude();
+    longitude = myGNSS.getLongitude();
     long altitude = myGNSS.getAltitude();
     byte SIV = myGNSS.getSIV();
 
@@ -458,6 +602,7 @@ void loop() {
     compass.setDeclinationAngle(declinationAngle);
     sVector_t mag = compass.readRaw();
     compass.getHeadingDegrees();
+    canSatHeading = mag.HeadingDegress;
 
     // Read slow sensor
     if (millis() - lastTime1 > 2000)
@@ -471,21 +616,58 @@ void loop() {
       humidityReading = event.relative_humidity;
 
       lastTime1 = millis(); //Update the timer
-      
-    }
-
-    // Read veery slow sensor
-    if (millis() - lastTime2 > 10000)
-    {
-      lastTime2 = millis(); //Update the timer
-
-      // TVOC sensor read:
-      tvoc = ags.getTVOC();
 
     }
 
-    if (millis() - lastTime3 > 10000) {
-      lastTime3 = millis(); //Update the timer
+    // // Read veery slow sensor
+    // if (millis() - lastTime2 > 10000)
+    // {
+    //   lastTime2 = millis(); //Update the timer
+    //   // TVOC sensor read:
+    //   tvoc = ags.getTVOC();
+    // }
+
+    // Targeted landing
+    if(servoTargeting){
+      double latitudeDouble = latitude / 10000000.0;
+      double longitudeDouble = longitude / 10000000.0;
+
+      double dLon = (longitudeTarget - longitudeDouble) * DEG_TO_RAD;
+      double lat1 = latitudeDouble * DEG_TO_RAD;
+      double lat2 = latitudeTarget * DEG_TO_RAD;
+      double y = sin(dLon) * cos(lat2);
+      double x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
+      double heading = atan2(y, x) * RAD_TO_DEG;
+
+      if (heading < 0) {
+        heading += 360.0;
+      }
+
+      calculatedHeading = heading - canSatHeading;
+
+        if (calculatedHeading < 0) {
+        calculatedHeading += 360.0;
+      } else if (calculatedHeading > 360.0) {
+        calculatedHeading -= 360.0;
+      }
+
+      for (int i = 0; i < numSpoilers; i++) {
+        int angleDifference = (calculatedHeading - spoilerAngles[i] + 360) % 360;
+        int diff = min(abs(angleDifference), 360 - abs(angleDifference));
+        spoilerExtension[i] = servoAngle - (diff / 120.0 * servoAngle);
+      }
+
+      servoPosition1 = spoilerExtension[0];
+      servoPosition2 = spoilerExtension[1];
+      servoPosition3 = spoilerExtension[2];
+
+    }
+    
+
+
+
+      if (millis() - lastTime3 > 10000) {
+        lastTime3 = millis(); //Update the timer
       Serial.print("UV index: ");
       Serial.println(uvIndex);
       Serial.print("PM1 standarized (µg/m3): ");
@@ -526,8 +708,8 @@ void loop() {
       Serial.println(altitude);
       Serial.print("Satelites in view: ");
       Serial.println(SIV);
-      Serial.print("TVOC (ppb): ");
-      Serial.println(tvoc);
+      // Serial.print("TVOC (ppb): ");
+      // Serial.println(tvoc);
       Serial.print("Acceleration x,y,z (g): ");
       Serial.print(gValue.x);
       Serial.print(", ");
@@ -555,165 +737,152 @@ void loop() {
       Serial.print("O2 (%): ");
       Serial.println(o2concentration);
 
-      Serial1.print("UV index: ");
-      Serial1.println(uvIndex);
-      Serial1.print("PM1 standarized (µg/m3): ");
-      Serial1.println(pms.getPM1_STD());
-      Serial1.print("PM1 standarized (µg/m3): ");
-      Serial1.println(pms.getPM1_STD());
-      Serial1.print("PM2.5 standarized (µg/m3): ");
-      Serial1.println(pms.getPM2_5_STD());
-      Serial1.print("PM10 standarized (µg/m3): ");
-      Serial1.println(pms.getPM10_STD());
-      Serial1.print("PM1 atmospheric (µg/m3): ");
-      Serial1.println(pms.getPM1_ATM());
-      Serial1.print("PM2.5 atmospheric (µg/m3): ");
-      Serial1.println(pms.getPM2_5_ATM());
-      Serial1.print("PM10 atmospheric (µg/m3): ");
-      Serial1.println(pms.getPM10_ATM());
-      Serial1.print("PN300 (#/0.1l): ");
-      Serial1.println(pms.getCntBeyond300nm());
-      Serial1.print("PN500 (#/0.1l): ");
-      Serial1.println(pms.getCntBeyond500nm());
-      Serial1.print("PN1000 (#/0.1l): ");
-      Serial1.println(pms.getCntBeyond1000nm());
-      Serial1.print("PN2500 (#/0.1l): ");
-      Serial1.println(pms.getCntBeyond2500nm());
-      Serial1.print("PN5000 (#/0.1l): ");
-      Serial1.println(pms.getCntBeyond5000nm());
-      Serial1.print("PN10000 (#/0.1l): ");
-      Serial1.println(pms.getCntBeyond10000nm());
-      Serial1.print("Temperature DHT11 (C): ");
-      Serial1.println(temperatureReading);
-      Serial1.print("Humidity (%): ");
-      Serial1.println(humidityReading);
-      Serial1.print("Latitude (degrees*10^-7): ");
-      Serial1.println(latitude);
-      Serial1.print("Longitude (degrees*10^-7): ");
-      Serial1.println(longitude);
-      Serial1.print("Altitude (mm): ");
-      Serial1.println(altitude);
-      Serial1.print("Satelites in view: ");
-      Serial1.println(SIV);
-      Serial1.print("TVOC (ppb): ");
-      Serial1.println(tvoc);
-      Serial1.print("Acceleration x,y,z (g): ");
-      Serial1.print(gValue.x);
-      Serial1.print(", ");
-      Serial1.print(gValue.y);
-      Serial1.print(", ");
-      Serial1.println(gValue.z);
-      Serial1.print("Resultant g: ");
-      Serial1.println(resultantG);
-      Serial1.println("Gyroscope x,y,z (degrees/s): ");
-      Serial1.print(gyr.x);
-      Serial1.print(", ");
-      Serial1.print(gyr.y);
-      Serial1.print(", ");
-      Serial1.println(gyr.z);
-      Serial1.print("Temperature MPU6500 (C): ");
-      Serial1.println(temp);
-      Serial1.print("Temperature BMP280 (C): ");
-      Serial1.println(temp_event.temperature);
-      Serial1.print("Pressure (hpa): ");
-      Serial1.println(pressure_event.pressure);
-      Serial1.print("Heading (degrees): ");
-      Serial1.println(mag.HeadingDegress);
-      Serial1.print("CO2 (ppb): ");
-      Serial1.println(co2concentration);
-      Serial1.print("O2 (%): ");
-      Serial1.println(o2concentration);
+      Serial2.print("UV=");
+      Serial2.println(uvIndex);
+      Serial2.print("PM1=");
+      Serial2.println(pms.getPM1_STD());
+      Serial2.print("PM1=");
+      Serial2.println(pms.getPM1_STD());
+      Serial2.print("PM2.5=");
+      Serial2.println(pms.getPM2_5_STD());
+      Serial2.print("PM10=");
+      Serial2.println(pms.getPM10_STD());
+      Serial2.print("PM1=");
+      Serial2.println(pms.getPM1_ATM());
+      Serial2.print("PM2.5=");
+      Serial2.println(pms.getPM2_5_ATM());
+      Serial2.print("PM10=");
+      Serial2.println(pms.getPM10_ATM());
+      Serial2.print("PN300=");
+      Serial2.println(pms.getCntBeyond300nm());
+      Serial2.print("PN500=");
+      Serial2.println(pms.getCntBeyond500nm());
+      Serial2.print("PN1000=");
+      Serial2.println(pms.getCntBeyond1000nm());
+      Serial2.print("PN2500=");
+      Serial2.println(pms.getCntBeyond2500nm());
+      Serial2.print("PN5000=");
+      Serial2.println(pms.getCntBeyond5000nm());
+      Serial2.print("PN10000=");
+      Serial2.println(pms.getCntBeyond10000nm());
+      Serial2.print("TempDHT=");
+      Serial2.println(temperatureReading);
+      Serial2.print("Humidity=");
+      Serial2.println(humidityReading);
+      Serial2.print("Lat=");
+      Serial2.println(latitude);
+      Serial2.print("Long=");
+      Serial2.println(longitude);
+      Serial2.print("Alt=");
+      Serial2.println(altitude);
+      Serial2.print("SIV=");
+      Serial2.println(SIV);
+      // Serial2.print("TVOC=");
+      // Serial2.println(tvoc);
+      Serial2.print("Acc=");
+      Serial2.print(gValue.x);
+      Serial2.print(";");
+      Serial2.print(gValue.y);
+      Serial2.print(";");
+      Serial2.println(gValue.z);
+      Serial2.print("G=");
+      Serial2.println(resultantG);
+      Serial2.print("Gyro=");
+      Serial2.print(gyr.x);
+      Serial2.print(";");
+      Serial2.print(gyr.y);
+      Serial2.print(";");
+      Serial2.println(gyr.z);
+      Serial2.print("TempMPU=");
+      Serial2.println(temp);
+      Serial2.print("TempBMP=");
+      Serial2.println(temp_event.temperature);
+      Serial2.print("Pressure=");
+      Serial2.println(pressure_event.pressure);
+      Serial2.print("Heading=");
+      Serial2.println(mag.HeadingDegress);
+      Serial2.print("CO2=");
+      Serial2.println(co2concentration);
+      Serial2.print("O2=");
+      Serial2.println(o2concentration);
 
-      File file = SD.open("/data.txt", FILE_APPEND);
-      file.print("UV index: ");
-      file.println(uvIndex);
-      file.print("PM1 standarized (µg/m3): ");
-      file.println(pms.getPM1_STD());
-      file.print("PM1 standarized (µg/m3): ");
-      file.println(pms.getPM1_STD());
-      file.print("PM2.5 standarized (µg/m3): ");
-      file.println(pms.getPM2_5_STD());
-      file.print("PM10 standarized (µg/m3): ");
-      file.println(pms.getPM10_STD());
-      file.print("PM1 atmospheric (µg/m3): ");
-      file.println(pms.getPM1_ATM());
-      file.print("PM2.5 atmospheric (µg/m3): ");
-      file.println(pms.getPM2_5_ATM());
-      file.print("PM10 atmospheric (µg/m3): ");
-      file.println(pms.getPM10_ATM());
-      file.print("PN300 (#/0.1l): ");
-      file.println(pms.getCntBeyond300nm());
-      file.print("PN500 (#/0.1l): ");
-      file.println(pms.getCntBeyond500nm());
-      file.print("PN1000 (#/0.1l): ");
-      file.println(pms.getCntBeyond1000nm());
-      file.print("PN2500 (#/0.1l): ");
-      file.println(pms.getCntBeyond2500nm());
-      file.print("PN5000 (#/0.1l): ");
-      file.println(pms.getCntBeyond5000nm());
-      file.print("PN10000 (#/0.1l): ");
-      file.println(pms.getCntBeyond10000nm());
-      file.print("Temperature DHT11 (C): ");
-      file.println(temperatureReading);
-      file.print("Humidity (%): ");
-      file.println(humidityReading);
-      file.print("Latitude (degrees*10^-7): ");
-      file.println(latitude);
-      file.print("Longitude (degrees*10^-7): ");
-      file.println(longitude);
-      file.print("Altitude (mm): ");
-      file.println(altitude);
-      file.print("Satelites in view: ");
-      file.println(SIV);
-      file.print("TVOC (ppb): ");
-      file.println(tvoc);
-      file.print("Acceleration x,y,z (g): ");
-      file.print(gValue.x);
-      file.print(", ");
-      file.print(gValue.y);
-      file.print(", ");
-      file.println(gValue.z);
-      file.print("Resultant g: ");
-      file.println(resultantG);
-      file.println("Gyroscope x,y,z (degrees/s): ");
-      file.print(gyr.x);
-      file.print(", ");
-      file.print(gyr.y);
-      file.print(", ");
-      file.println(gyr.z);
-      file.print("Temperature MPU6500 (C): ");
-      file.println(temp);
-      file.print("Temperature BMP280 (C): ");
-      file.println(temp_event.temperature);
-      file.print("Pressure (hpa): ");
-      file.println(pressure_event.pressure);
-      file.print("Heading (degrees): ");
-      file.println(mag.HeadingDegress);
-      file.print("CO2 (ppb): ");
-      file.println(co2concentration);
-      file.print("O2 (%): ");
-      file.println(o2concentration);
-      file.close();
+    //   File file = SD.open("/data.txt", FILE_APPEND);
+    //   file.print("UV index: ");
+    //   file.println(uvIndex);
+    //   file.print("PM1 standarized (µg/m3): ");
+    //   file.println(pms.getPM1_STD());
+    //   file.print("PM1 standarized (µg/m3): ");
+    //   file.println(pms.getPM1_STD());
+    //   file.print("PM2.5 standarized (µg/m3): ");
+    //   file.println(pms.getPM2_5_STD());
+    //   file.print("PM10 standarized (µg/m3): ");
+    //   file.println(pms.getPM10_STD());
+    //   file.print("PM1 atmospheric (µg/m3): ");
+    //   file.println(pms.getPM1_ATM());
+    //   file.print("PM2.5 atmospheric (µg/m3): ");
+    //   file.println(pms.getPM2_5_ATM());
+    //   file.print("PM10 atmospheric (µg/m3): ");
+    //   file.println(pms.getPM10_ATM());
+    //   file.print("PN300 (#/0.1l): ");
+    //   file.println(pms.getCntBeyond300nm());
+    //   file.print("PN500 (#/0.1l): ");
+    //   file.println(pms.getCntBeyond500nm());
+    //   file.print("PN1000 (#/0.1l): ");
+    //   file.println(pms.getCntBeyond1000nm());
+    //   file.print("PN2500 (#/0.1l): ");
+    //   file.println(pms.getCntBeyond2500nm());
+    //   file.print("PN5000 (#/0.1l): ");
+    //   file.println(pms.getCntBeyond5000nm());
+    //   file.print("PN10000 (#/0.1l): ");
+    //   file.println(pms.getCntBeyond10000nm());
+    //   file.print("Temperature DHT11 (C): ");
+    //   file.println(temperatureReading);
+    //   file.print("Humidity (%): ");
+    //   file.println(humidityReading);
+    //   file.print("Latitude (degrees*10^-7): ");
+    //   file.println(latitude);
+    //   file.print("Longitude (degrees*10^-7): ");
+    //   file.println(longitude);
+    //   file.print("Altitude (mm): ");
+    //   file.println(altitude);
+    //   file.print("Satelites in view: ");
+    //   file.println(SIV);
+    //   // file.print("TVOC (ppb): ");
+    //   // file.println(tvoc);
+    //   file.print("Acceleration x,y,z (g): ");
+    //   file.print(gValue.x);
+    //   file.print(", ");
+    //   file.print(gValue.y);
+    //   file.print(", ");
+    //   file.println(gValue.z);
+    //   file.print("Resultant g: ");
+    //   file.println(resultantG);
+    //   file.println("Gyroscope x,y,z (degrees/s): ");
+    //   file.print(gyr.x);
+    //   file.print(", ");
+    //   file.print(gyr.y);
+    //   file.print(", ");
+    //   file.println(gyr.z);
+    //   file.print("Temperature MPU6500 (C): ");
+    //   file.println(temp);
+    //   file.print("Temperature BMP280 (C): ");
+    //   file.println(temp_event.temperature);
+    //   file.print("Pressure (hpa): ");
+    //   file.println(pressure_event.pressure);
+    //   file.print("Heading (degrees): ");
+    //   file.println(mag.HeadingDegress);
+    //   file.print("CO2 (ppb): ");
+    //   file.println(co2concentration);
+    //   file.print("O2 (%): ");
+    //   file.println(o2concentration);
+    //   file.close();
     }
 
+    // digitalWrite(BEEPER, HIGH);
+    // delay(1);
+    // digitalWrite(BEEPER, LOW);
+
   }  
-
-
-  if(setRadioParameters){
-    ResponseStructContainer c;
-    c = e220ttl.getConfiguration();
-    Configuration configuration = *(Configuration*) c.data;
-    configuration.ADDL = radioAddressLo;
-    configuration.ADDH = radioAddressHi;
-    configuration.CHAN = RadioChannel;
-    ResponseStatus rs = e220ttl.setConfiguration(configuration, WRITE_CFG_PWR_DWN_SAVE);
-    c = e220ttl.getConfiguration();
-    configuration = *(Configuration*) c.data;
-    Serial.print(F("AddH: "));  Serial.println(configuration.ADDH, HEX);
-	  Serial.print(F("AddL: "));  Serial.println(configuration.ADDL, HEX);
-	  Serial.print(F("Chan: "));  Serial.println(configuration.CHAN, DEC);
-    c.close();    
-  }
 
 
 }
