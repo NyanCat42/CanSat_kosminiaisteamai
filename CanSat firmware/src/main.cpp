@@ -122,7 +122,7 @@ const int bufferSizeO2 = 7;
 byte bufferO2[bufferSizeO2];
 int bufferIndexO2 = 0;
 bool found0xFF = false;
-int o2concentration = 0;
+float o2concentration = 0;
 
 
 // Targeting defines
@@ -438,6 +438,49 @@ void setup() {
 
 void loop() {
 
+    // Magnetometer read:
+    float declinationAngle = (8.0 + (35.0 / 60.0)) / (180 / PI);
+    compass.setDeclinationAngle(declinationAngle);
+    sVector_t mag = compass.readRaw();
+    compass.getHeadingDegrees();
+    canSatHeading = mag.HeadingDegress;
+
+    // Targeted landing
+    if(servoTargeting){
+      double latitudeDouble = latitude / 10000000.0;
+      double longitudeDouble = longitude / 10000000.0;
+
+      double dLon = (longitudeTarget - longitudeDouble) * DEG_TO_RAD;
+      double lat1 = latitudeDouble * DEG_TO_RAD;
+      double lat2 = latitudeTarget * DEG_TO_RAD;
+      double y = sin(dLon) * cos(lat2);
+      double x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
+      double heading = atan2(y, x) * RAD_TO_DEG;
+
+      if (heading < 0) {
+        heading += 360.0;
+      }
+
+      calculatedHeading = heading - canSatHeading;
+
+        if (calculatedHeading < 0) {
+        calculatedHeading += 360.0;
+      } else if (calculatedHeading > 360.0) {
+        calculatedHeading -= 360.0;
+      }
+
+      for (int i = 0; i < numSpoilers; i++) {
+        int angleDifference = (calculatedHeading - spoilerAngles[i] + 360) % 360;
+        int diff = min(abs(angleDifference), 360 - abs(angleDifference));
+        spoilerExtension[i] = servoAngle - (diff / 120.0 * servoAngle);
+      }
+
+      servoPosition1 = map(spoilerExtension[0], -90, 180, 150, 0);
+      servoPosition2 = map(spoilerExtension[1], -90, 180, 170, 20);
+      servoPosition3 = map(spoilerExtension[2], -90, 180, 150, 0);
+
+    }
+
     
   // Read CO2 sensor
   if (co2Serial.available()) {
@@ -466,7 +509,7 @@ void loop() {
       if (bufferIndexO2 == 3) {
         byte hiByteO2 = bufferO2[1];
         byte loByteO2 = bufferO2[2];
-        o2concentration = hiByteO2 * 256 + loByteO2;
+        o2concentration = (hiByteO2 * 256 + loByteO2) / 10.00;
         bufferIndexO2 = 0;
         found0xFF = false;
       }
@@ -596,14 +639,6 @@ void loop() {
     bmp_temp->getEvent(&temp_event);
     bmp_pressure->getEvent(&pressure_event);
 
-
-    // Magnetometer read:
-    float declinationAngle = (8.0 + (35.0 / 60.0)) / (180 / PI);
-    compass.setDeclinationAngle(declinationAngle);
-    sVector_t mag = compass.readRaw();
-    compass.getHeadingDegrees();
-    canSatHeading = mag.HeadingDegress;
-
     // Read slow sensor
     if (millis() - lastTime1 > 2000)
     {
@@ -627,47 +662,9 @@ void loop() {
     //   tvoc = ags.getTVOC();
     // }
 
-    // Targeted landing
-    if(servoTargeting){
-      double latitudeDouble = latitude / 10000000.0;
-      double longitudeDouble = longitude / 10000000.0;
 
-      double dLon = (longitudeTarget - longitudeDouble) * DEG_TO_RAD;
-      double lat1 = latitudeDouble * DEG_TO_RAD;
-      double lat2 = latitudeTarget * DEG_TO_RAD;
-      double y = sin(dLon) * cos(lat2);
-      double x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
-      double heading = atan2(y, x) * RAD_TO_DEG;
-
-      if (heading < 0) {
-        heading += 360.0;
-      }
-
-      calculatedHeading = heading - canSatHeading;
-
-        if (calculatedHeading < 0) {
-        calculatedHeading += 360.0;
-      } else if (calculatedHeading > 360.0) {
-        calculatedHeading -= 360.0;
-      }
-
-      for (int i = 0; i < numSpoilers; i++) {
-        int angleDifference = (calculatedHeading - spoilerAngles[i] + 360) % 360;
-        int diff = min(abs(angleDifference), 360 - abs(angleDifference));
-        spoilerExtension[i] = servoAngle - (diff / 120.0 * servoAngle);
-      }
-
-      servoPosition1 = map(spoilerExtension[0], -90, 180, 150, 0);
-      servoPosition2 = map(spoilerExtension[1], -90, 180, 170, 20);
-      servoPosition3 = map(spoilerExtension[2], -90, 180, 150, 0);
-
-    }
-    
-
-
-
-      if (millis() - lastTime3 > 10000) {
-        lastTime3 = millis(); //Update the timer
+      // if (millis() - lastTime3 > 10000) {
+      //   lastTime3 = millis(); //Update the timer
       Serial.print("UV index: ");
       Serial.println(uvIndex);
       Serial.print("PM1 standarized (µg/m3): ");
@@ -737,74 +734,74 @@ void loop() {
       Serial.print("O2 (%): ");
       Serial.println(o2concentration);
 
-      Serial2.print("UV=");
-      Serial2.println(uvIndex);
-      Serial2.print("PM1=");
-      Serial2.println(pms.getPM1_STD());
-      Serial2.print("PM1=");
-      Serial2.println(pms.getPM1_STD());
-      Serial2.print("PM2.5=");
-      Serial2.println(pms.getPM2_5_STD());
-      Serial2.print("PM10=");
-      Serial2.println(pms.getPM10_STD());
-      Serial2.print("PM1=");
-      Serial2.println(pms.getPM1_ATM());
-      Serial2.print("PM2.5=");
-      Serial2.println(pms.getPM2_5_ATM());
-      Serial2.print("PM10=");
-      Serial2.println(pms.getPM10_ATM());
-      Serial2.print("PN300=");
-      Serial2.println(pms.getCntBeyond300nm());
-      Serial2.print("PN500=");
-      Serial2.println(pms.getCntBeyond500nm());
-      Serial2.print("PN1000=");
-      Serial2.println(pms.getCntBeyond1000nm());
-      Serial2.print("PN2500=");
-      Serial2.println(pms.getCntBeyond2500nm());
-      Serial2.print("PN5000=");
-      Serial2.println(pms.getCntBeyond5000nm());
-      Serial2.print("PN10000=");
-      Serial2.println(pms.getCntBeyond10000nm());
-      Serial2.print("TempDHT=");
-      Serial2.println(temperatureReading);
-      Serial2.print("Humidity=");
-      Serial2.println(humidityReading);
-      Serial2.print("Lat=");
-      Serial2.println(latitude);
-      Serial2.print("Long=");
-      Serial2.println(longitude);
-      Serial2.print("Alt=");
-      Serial2.println(altitude);
-      Serial2.print("SIV=");
-      Serial2.println(SIV);
-      // Serial2.print("TVOC=");
-      // Serial2.println(tvoc);
-      Serial2.print("Acc=");
+      Serial2.print("/*EMA,"); // 1
+      Serial2.print(pms.getPM1_STD()); //2
+      Serial2.print(",");
+      Serial2.print(pms.getPM2_5_STD()); //3
+      Serial2.print(",");
+      Serial2.print(pms.getPM10_STD()); //4
+      Serial2.print(",");
+      Serial2.print(pms.getPM1_ATM()); // 5
+      Serial2.print(",");
+      Serial2.print(pms.getPM2_5_ATM()); //6
+      Serial2.print(",");
+      Serial2.print(pms.getPM10_ATM());
+      Serial2.print(",");
+      Serial2.print(pms.getCntBeyond300nm());
+      Serial2.print(",");
+      Serial2.print(pms.getCntBeyond500nm());
+      Serial2.print(",");
+      Serial2.print(pms.getCntBeyond1000nm());
+      Serial2.print(",");
+      Serial2.print(pms.getCntBeyond2500nm());
+      Serial2.print(",");
+      Serial2.print(pms.getCntBeyond5000nm());
+      Serial2.print(",");
+      Serial2.print(pms.getCntBeyond10000nm());
+      Serial2.print(",");
+      float printLat = latitude/10000000.00000000;
+      Serial2.print(printLat, 7);
+      Serial2.print(",");
+      float printLong = longitude/10000000.00000000;
+      Serial2.print(printLong, 7);
+      Serial2.print(",");
+      Serial2.print(altitude/1000);
+      Serial2.print(",");
+      Serial2.print(SIV);
+      Serial2.print(",");
       Serial2.print(gValue.x);
-      Serial2.print(";");
+      Serial2.print(",");
       Serial2.print(gValue.y);
-      Serial2.print(";");
-      Serial2.println(gValue.z);
-      Serial2.print("G=");
-      Serial2.println(resultantG);
-      Serial2.print("Gyro=");
+      Serial2.print(",");
+      Serial2.print(gValue.z);
+      Serial2.print(",");
       Serial2.print(gyr.x);
-      Serial2.print(";");
+      Serial2.print(",");
       Serial2.print(gyr.y);
-      Serial2.print(";");
-      Serial2.println(gyr.z);
-      Serial2.print("TempMPU=");
-      Serial2.println(temp);
-      Serial2.print("TempBMP=");
-      Serial2.println(temp_event.temperature);
-      Serial2.print("Pressure=");
-      Serial2.println(pressure_event.pressure);
-      Serial2.print("Heading=");
-      Serial2.println(mag.HeadingDegress);
-      Serial2.print("CO2=");
-      Serial2.println(co2concentration);
-      Serial2.print("O2=");
-      Serial2.println(o2concentration);
+      Serial2.print(",");
+      Serial2.print(gyr.z);
+      Serial2.print(",");
+      Serial2.print(temperatureReading);
+      Serial2.print(",");
+      Serial2.print(temp);
+      Serial2.print(",");
+      Serial2.print(temp_event.temperature);
+      Serial2.print(",");
+      Serial2.print(co2concentration);
+      Serial2.print(",");
+      Serial2.print(o2concentration, 1);
+      Serial2.print(",");
+      Serial2.print(humidityReading);
+      Serial2.print(",");
+      Serial2.print(pressure_event.pressure);
+      Serial2.print(",");
+      Serial2.print(mag.HeadingDegress);
+      Serial2.print(",");
+      Serial2.print(uvIndex);
+      Serial2.println("*/");
+
+
+
 
     //   File file = SD.open("/data.txt", FILE_APPEND);
     //   file.print("UV index: ");
@@ -876,7 +873,7 @@ void loop() {
     //   file.print("O2 (%): ");
     //   file.println(o2concentration);
     //   file.close();
-    }
+    //}
 
     // digitalWrite(BEEPER, HIGH);
     // delay(1);
