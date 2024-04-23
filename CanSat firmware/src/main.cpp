@@ -20,9 +20,9 @@
 //Pin Defines:
 #define PMSRX 39
 #define PMSTX 33
-#define SERVO1PIN 12
-#define SERVO2PIN 14
-#define SERVO3PIN 27
+#define SERVO1PIN 27
+#define SERVO2PIN 12
+#define SERVO3PIN 14
 #define DHTPIN 4
 #define GPSRX 36
 #define GPSTX 32
@@ -50,7 +50,7 @@ Servo servo1;
 Servo servo2;
 Servo servo3;
 int servoPosition1 = 0;
-int servoPosition2 = 0;
+int servoPosition2 = 20;
 int servoPosition3 = 0;
 
 //Humidity sensor defines:
@@ -538,13 +538,13 @@ void loop() {
     } else if (incomingCommand == 2 && setAddCh == false){
         Serial.print("Opening sides");
         servoPosition1 = 0;
-        servoPosition2 = 0;
+        servoPosition2 = 20;
         servoPosition3 = 0;
         servoTargeting = false;
     } else if (incomingCommand == 3 && setAddCh == false){
         Serial.print("Closing sides");
         servoPosition1 = 150;
-        servoPosition2 = 150;
+        servoPosition2 = 180;
         servoPosition3 = 150;
         servoTargeting = false;
     } else if (incomingCommand == 4 && setAddCh == false){
@@ -657,9 +657,9 @@ void loop() {
         spoilerExtension[i] = servoAngle - (diff / 120.0 * servoAngle);
       }
 
-      servoPosition1 = spoilerExtension[0];
-      servoPosition2 = spoilerExtension[1];
-      servoPosition3 = spoilerExtension[2];
+      servoPosition1 = map(spoilerExtension[0], -90, 180, 150, 0);
+      servoPosition2 = map(spoilerExtension[1], -90, 180, 170, 20);
+      servoPosition3 = map(spoilerExtension[2], -90, 180, 150, 0);
 
     }
     
