@@ -1,6 +1,6 @@
 # Žvėryno gimnazijos CanSat
 
-![CanSat](https://lh3.google.com/u/0/d/1H3sFSpYC6X4pXe65sbN1g2fVt1TSKtr2=w1024-h694-iv1)
+![CanSat](https://drive.google.com/uc?export=view&id=1H3sFSpYC6X4pXe65sbN1g2fVt1TSKtr2)
 
 ## Feature'ai:
 
